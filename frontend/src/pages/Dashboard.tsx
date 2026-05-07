@@ -113,12 +113,13 @@ export const Dashboard = () => {
 
       <main className="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
         {/* Watch Together Section */}
-        {videos.length > 0 && (
-          <section className="mb-12">
-            <div className="flex items-center mb-6">
-              <Film className="h-6 w-6 text-blue-600 mr-2" />
-              <h2 className="text-2xl font-bold text-slate-900">Watch Together</h2>
-            </div>
+        <section className="mb-12">
+          <div className="flex items-center mb-6">
+            <Film className="h-6 w-6 text-blue-600 mr-2" />
+            <h2 className="text-2xl font-bold text-slate-900">Watch Together</h2>
+          </div>
+          
+          {videos.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {videos.map(vid => (
                 <div 
@@ -140,8 +141,18 @@ export const Dashboard = () => {
                 </div>
               ))}
             </div>
-          </section>
-        )}
+          ) : (
+            <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center">
+              <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Film className="text-slate-400" size={32} />
+              </div>
+              <h3 className="text-slate-800 font-bold text-lg">No videos yet</h3>
+              <p className="text-slate-500 text-sm max-w-xs mx-auto mt-2">
+                Upload a movie or video clip to one of your workspaces to start a secure watch party with friends!
+              </p>
+            </div>
+          )}
+        </section>
 
         <div className="flex justify-between items-center mb-8">
           <div>
