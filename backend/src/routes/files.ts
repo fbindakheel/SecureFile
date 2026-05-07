@@ -7,7 +7,7 @@ import prisma from '../prismaClient';
 import { authenticate, AuthRequest } from '../middlewares/authMiddleware';
 import { encryptFile, decryptFileStream } from '../services/cryptoService';
 import { scanFile } from '../services/virusScanner';
-import { uploadToCloud, downloadFromCloud } from '../services/storageService';
+import { uploadToCloud, downloadFromCloud, deleteFromCloud } from '../services/storageService';
 
 const router = Router();
 
@@ -157,6 +157,12 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
     res.on('finish', () => {
       if (fs.existsSync(tempEncPath)) fs.unlinkSync(tempEncPath);
     });
+  } catch (error) {
+    console.error(error);
+    if (fs.existsSync(tempEncPath)) fs.unlinkSync(tempEncPath);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 router.delete('/:fileId', async (req: AuthRequest, res) => {
   try {
