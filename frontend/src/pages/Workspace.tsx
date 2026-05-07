@@ -61,39 +61,50 @@ export const Workspace = () => {
 
     try {
       setUploadStatus('Fingerprinting...');
-      // 1. Encrypt and Hash on Client
       const { encryptedBlob, keyHex, ivHex, hashHex } = await encryptFileClient(file);
       
-      // 2. Check for Instant Upload (Deduplication)
       setUploadStatus('Checking for duplicates...');
       const formData = new FormData();
       formData.append('workspaceId', id!);
       formData.append('originalName', file.name);
       formData.append('fileHash', hashHex);
       
-      const instantRes = await api.post('/files/upload', formData);
-      if (instantRes.data.message?.includes('Instant')) {
+      let instantRes;
+      try {
+        instantRes = await api.post('/files/upload', formData);
+      } catch (e) {
+        console.warn('Deduplication check failed, proceeding to upload...');
+      }
+
+      if (instantRes?.data?.message?.includes('Instant')) {
         setUploadProgress(100);
         fetchFiles();
         return;
       }
 
-      // 3. Direct Cloud Upload (Bypasses Render 30s timeout)
       setUploadStatus('Requesting access...');
-      const { data: { signedUrl, storedName } } = await api.get('/files/signed-upload-url');
+      let signedUrl, storedName;
+      try {
+        const res = await api.get('/files/signed-upload-url');
+        signedUrl = res.data.signedUrl;
+        storedName = res.data.storedName;
+      } catch (e) {
+        throw new Error('Server denied upload access. Check backend logs.');
+      }
 
       setUploadStatus('Uploading...');
-      
-      // Upload directly to Supabase
-      await axios.put(signedUrl, encryptedBlob, {
-        headers: { 'Content-Type': 'application/octet-stream' },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
-          setUploadProgress(percentCompleted);
-        }
-      });
+      try {
+        await axios.put(signedUrl, encryptedBlob, {
+          headers: { 'Content-Type': 'application/octet-stream' },
+          onUploadProgress: (progressEvent) => {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
+            setUploadProgress(percentCompleted);
+          }
+        });
+      } catch (e) {
+        throw new Error('Cloud storage rejected the file. (CORS or Size limit)');
+      }
 
-      // 4. Register with backend
       setUploadStatus('Finalizing...');
       const finalData = new FormData();
       finalData.append('workspaceId', id!);
@@ -109,7 +120,7 @@ export const Workspace = () => {
       fetchFiles();
     } catch (err: any) {
       console.error(err);
-      setUploadError(err.response?.data?.error || 'Upload failed. Your internet might be unstable.');
+      setUploadError(err.message || 'Upload failed. Your internet might be unstable.');
     } finally {
       setIsUploading(false);
       setUploadStatus('');
