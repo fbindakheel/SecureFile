@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/api';
-import { Folder, Plus, LogOut, Trash2 } from 'lucide-react';
+import { Folder, Plus, LogOut, Trash2, Play, Film } from 'lucide-react';
+import { WatchParty } from '../components/WatchParty';
 
 interface Workspace {
   id: string;
@@ -10,22 +11,35 @@ interface Workspace {
   role: string;
 }
 
+interface VideoFile {
+  id: string;
+  originalName: string;
+  workspaceId: string;
+}
+
 export const Dashboard = () => {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [videos, setVideos] = useState<VideoFile[]>([]);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [watchingFile, setWatchingFile] = useState<VideoFile | null>(null);
+  
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    fetchWorkspaces();
+    fetchData();
   }, []);
 
-  const fetchWorkspaces = async () => {
+  const fetchData = async () => {
     try {
-      const { data } = await api.get('/workspaces');
-      setWorkspaces(data);
+      const [wsRes, vidRes] = await Promise.all([
+        api.get('/workspaces'),
+        api.get('/files/all-videos')
+      ]);
+      setWorkspaces(wsRes.data);
+      setVideos(vidRes.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -33,10 +47,18 @@ export const Dashboard = () => {
     }
   };
 
+  const fetchWorkspaces = async () => {
+    try {
+      const { data } = await api.get('/workspaces');
+      setWorkspaces(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleDeleteWorkspace = async (e: React.MouseEvent, wsId: string) => {
-    e.stopPropagation(); // Don't navigate to workspace
+    e.stopPropagation();
     if (!window.confirm('Are you sure you want to delete this workspace and all its files?')) return;
-    
     try {
       await api.delete(`/workspaces/${wsId}`);
       fetchWorkspaces();
@@ -50,7 +72,6 @@ export const Dashboard = () => {
     e.preventDefault();
     if (!newWorkspaceName.trim()) return;
 
-    // Optimistic Update: Add to UI immediately
     const tempId = 'temp-' + Date.now();
     const optimisticWs = { id: tempId, name: newWorkspaceName, role: 'ADMIN' };
     setWorkspaces([optimisticWs, ...workspaces]);
@@ -59,10 +80,9 @@ export const Dashboard = () => {
 
     try {
       await api.post('/workspaces', { name: newWorkspaceName });
-      fetchWorkspaces(); // Refresh to get real ID
+      fetchWorkspaces();
     } catch (err) {
       console.error(err);
-      // Rollback on error
       setWorkspaces(workspaces.filter(ws => ws.id !== tempId));
       alert('Failed to create workspace');
     }
@@ -92,6 +112,37 @@ export const Dashboard = () => {
       </nav>
 
       <main className="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
+        {/* Watch Together Section */}
+        {videos.length > 0 && (
+          <section className="mb-12">
+            <div className="flex items-center mb-6">
+              <Film className="h-6 w-6 text-blue-600 mr-2" />
+              <h2 className="text-2xl font-bold text-slate-900">Watch Together</h2>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {videos.map(vid => (
+                <div 
+                  key={vid.id}
+                  className="bg-slate-900 rounded-xl overflow-hidden group relative aspect-video flex items-center justify-center border border-slate-800 shadow-lg"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-60"></div>
+                  <Film className="text-slate-700 h-12 w-12" />
+                  
+                  <div className="absolute inset-0 flex flex-col justify-end p-4">
+                    <p className="text-white font-medium text-sm truncate mb-2">{vid.originalName}</p>
+                    <button
+                      onClick={() => setWatchingFile({ id: vid.id, name: vid.originalName, workspaceId: vid.workspaceId })}
+                      className="bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded-lg flex items-center justify-center transition scale-90 group-hover:scale-100"
+                    >
+                      <Play size={16} className="mr-1 fill-current" /> Watch Now
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Your Workspaces</h1>
@@ -188,6 +239,16 @@ export const Dashboard = () => {
           </div>
         )}
       </main>
+
+      {watchingFile && (
+        <WatchParty
+          fileId={watchingFile.id}
+          fileName={watchingFile.originalName}
+          workspaceId={watchingFile.workspaceId}
+          user={user}
+          onClose={() => setWatchingFile(null)}
+        />
+      )}
     </div>
   );
 };

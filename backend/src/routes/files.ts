@@ -10,10 +10,34 @@ import { scanFile } from '../services/virusScanner';
 import { uploadToCloud, downloadFromCloud, deleteFromCloud } from '../services/storageService';
 
 const router = Router();
-
 const upload = multer({ dest: 'storage/temp/' });
 
 router.use(authenticate);
+
+// Get all videos across all workspaces for the user
+router.get('/all-videos', async (req: AuthRequest, res) => {
+  try {
+    // 1. Get all workspace IDs the user belongs to
+    const memberships = await prisma.workspaceMember.findMany({
+      where: { userId: req.user!.id }
+    });
+    const workspaceIds = memberships.map(m => m.workspaceId);
+
+    // 2. Get all videos in those workspaces
+    const videos = await prisma.file.findMany({
+      where: {
+        workspaceId: { in: workspaceIds },
+        mimeType: { startsWith: 'video/' }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json(videos);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Middleware to check workspace access
 const checkWorkspaceAccess = async (req: AuthRequest, res: any, next: any) => {
