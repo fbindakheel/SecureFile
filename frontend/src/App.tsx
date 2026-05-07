@@ -1,3 +1,4 @@
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { Login } from './pages/Login';
@@ -5,9 +6,9 @@ import { Dashboard } from './pages/Dashboard';
 import { Workspace } from './pages/Workspace';
 import { ShareAccess } from './pages/ShareAccess';
 
-const PrivateRoute = ({ children }: { children: JSX.Element }) => {
+const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
   const { token } = useAuth();
-  return token ? children : <Navigate to="/login" />;
+  return token ? <>{children}</> : <Navigate to="/login" />;
 };
 
 const AppRoutes = () => {

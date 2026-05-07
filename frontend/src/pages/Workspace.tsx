@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/api';
 import { File as FileIcon, Upload, Share2, Download, ArrowLeft, ShieldCheck, AlertTriangle } from 'lucide-react';
