@@ -29,3 +29,11 @@ export const downloadFromCloud = async (fileName: string): Promise<Buffer> => {
   const arrayBuffer = await data.arrayBuffer();
   return Buffer.from(arrayBuffer);
 };
+
+export const deleteFromCloud = async (fileName: string): Promise<void> => {
+  const { error } = await supabase.storage
+    .from('files')
+    .remove([fileName]);
+
+  if (error) throw error;
+};

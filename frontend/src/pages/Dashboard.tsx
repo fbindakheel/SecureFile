@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/api';
-import { Folder, Plus, LogOut } from 'lucide-react';
+import { Folder, Plus, LogOut, Trash2 } from 'lucide-react';
 
 interface Workspace {
   id: string;
@@ -27,6 +27,19 @@ export const Dashboard = () => {
       setWorkspaces(data);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleDeleteWorkspace = async (e: React.MouseEvent, wsId: string) => {
+    e.stopPropagation(); // Don't navigate to workspace
+    if (!window.confirm('Are you sure you want to delete this workspace and all its files?')) return;
+    
+    try {
+      await api.delete(`/workspaces/${wsId}`);
+      fetchWorkspaces();
+    } catch (err) {
+      console.error(err);
+      alert('Only Admins can delete workspaces');
     }
   };
 
@@ -125,6 +138,15 @@ export const Dashboard = () => {
                     </span>
                   </div>
                 </div>
+                {ws.role === 'ADMIN' && (
+                  <button
+                    onClick={(e) => handleDeleteWorkspace(e, ws.id)}
+                    className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                    title="Delete Workspace"
+                  >
+                    <Trash2 size={18} />
+                  </button>
+                )}
               </div>
             </div>
           ))}

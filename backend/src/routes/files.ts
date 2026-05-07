@@ -154,13 +154,44 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
     
     fileStream.pipe(decipher).pipe(res);
 
-    // Cleanup temp file after response finishes
     res.on('finish', () => {
       if (fs.existsSync(tempEncPath)) fs.unlinkSync(tempEncPath);
     });
+
+router.delete('/:fileId', async (req: AuthRequest, res) => {
+  try {
+    const fileId = req.params.fileId as string;
+    const file = await prisma.file.findUnique({ where: { id: fileId } });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+
+    // Check access (Must be ADMIN or EDITOR to delete)
+    const membership = await prisma.workspaceMember.findUnique({
+      where: { userId_workspaceId: { userId: req.user!.id, workspaceId: file.workspaceId } }
+    });
+
+    if (!membership || (membership.role !== 'ADMIN' && membership.role !== 'EDITOR')) {
+      return res.status(403).json({ error: 'Permission denied. Only Admins and Editors can delete files.' });
+    }
+
+    // 1. Delete from Cloud
+    await deleteFromCloud(file.storedName);
+
+    // 2. Delete from DB
+    await prisma.file.delete({ where: { id: fileId } });
+
+    // 3. Audit log
+    await prisma.auditLog.create({
+      data: {
+        userId: req.user!.id,
+        action: 'DELETE_FILE',
+        targetId: fileId,
+        targetType: 'File'
+      }
+    });
+
+    res.json({ message: 'File deleted successfully' });
   } catch (error) {
     console.error(error);
-    if (fs.existsSync(tempEncPath)) fs.unlinkSync(tempEncPath);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

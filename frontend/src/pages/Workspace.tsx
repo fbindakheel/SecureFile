@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/api';
-import { File as FileIcon, Upload, Share2, Download, ArrowLeft, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { File as FileIcon, Upload, Share2, Download, ArrowLeft, ShieldCheck, AlertTriangle, Trash2, Play } from 'lucide-react';
+import { WatchParty } from '../components/WatchParty';
+import { useAuth } from '../context/AuthContext';
 
 interface FileItem {
   id: string;
@@ -9,6 +11,7 @@ interface FileItem {
   size: number;
   scanStatus: string;
   createdAt: string;
+  mimeType: string;
 }
 
 export const Workspace = () => {
@@ -23,6 +26,8 @@ export const Workspace = () => {
   const [shareFileId, setShareFileId] = useState<string | null>(null);
   const [sharePassword, setSharePassword] = useState('');
   const [shareLink, setShareLink] = useState('');
+  const [watchingFile, setWatchingFile] = useState<{ id: string, name: string } | null>(null);
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchFiles();
@@ -75,6 +80,16 @@ export const Workspace = () => {
       link.remove();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleDeleteFile = async (fileId: string) => {
+    try {
+      await api.delete(`/files/${fileId}`);
+      fetchFiles();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete file');
     }
   };
 
@@ -178,6 +193,26 @@ export const Workspace = () => {
                   >
                     <Share2 size={18} />
                   </button>
+                  {file.mimeType.startsWith('video/') && (
+                    <button
+                      onClick={() => setWatchingFile({ id: file.id, name: file.originalName })}
+                      className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition"
+                      title="Watch Together"
+                    >
+                      <Play size={18} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Are you sure you want to delete this file?')) {
+                        handleDeleteFile(file.id);
+                      }
+                    }}
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition"
+                    title="Delete"
+                  >
+                    <Trash2 size={18} />
+                  </button>
                   <button
                     onClick={() => handleDownload(file.id, file.originalName)}
                     className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded transition"
@@ -247,6 +282,16 @@ export const Workspace = () => {
             )}
           </div>
         </div>
+      )}
+
+      {watchingFile && (
+        <WatchParty
+          fileId={watchingFile.id}
+          fileName={watchingFile.name}
+          workspaceId={id!}
+          user={user}
+          onClose={() => setWatchingFile(null)}
+        />
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import workspacesRoutes from './routes/workspaces';
 import filesRoutes from './routes/files';
 import sharesRoutes from './routes/shares';
 import fs from 'fs';
+import { Server } from 'socket.io';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -31,6 +32,27 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+// Watch Together Sync Server (Socket.io)
+const io = new Server(server, {
+  cors: {
+    origin: '*', 
+  }
+});
+
+io.on('connection', (socket) => {
+  socket.on('join-workspace', (workspaceId) => {
+    socket.join(workspaceId);
+  });
+
+  socket.on('video-event', ({ workspaceId, event, data }) => {
+    socket.to(workspaceId).emit('video-update', { event, data });
+  });
+
+  socket.on('send-message', ({ workspaceId, message, user }) => {
+    io.to(workspaceId).emit('receive-message', { message, user, timestamp: new Date() });
+  });
 });
