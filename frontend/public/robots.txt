@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Allow: /login
+Disallow: /workspace/*
+Disallow: /api/*
+
+Sitemap: https://securefile-cloud.netlify.app/sitemap.xml

@@ -38,11 +38,12 @@ export const Login = () => {
           <div className="mx-auto bg-blue-600 text-white w-12 h-12 rounded-lg flex items-center justify-center mb-4">
             <Lock size={24} />
           </div>
+          <h1 className="text-4xl font-extrabold text-blue-600 mb-2">SecureFile</h1>
           <h2 className="text-2xl font-bold text-slate-800">
             {isRegister ? 'Create an Account' : 'Welcome Back'}
           </h2>
           <p className="text-slate-500 text-sm mt-2">
-            Securely manage and share your files
+            Ultra-Secure Private Cloud Storage & Team Collaboration
           </p>
         </div>
 
