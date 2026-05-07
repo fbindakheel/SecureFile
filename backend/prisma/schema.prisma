@@ -1,0 +1,82 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id               String            @id @default(uuid())
+  email            String            @unique
+  password         String
+  name             String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  workspaces       WorkspaceMember[]
+  filesUploaded    File[]
+  auditLogs        AuditLog[]
+}
+
+model Workspace {
+  id        String            @id @default(uuid())
+  name      String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  members   WorkspaceMember[]
+  files     File[]
+}
+
+model WorkspaceMember {
+  id          String    @id @default(uuid())
+  userId      String
+  workspaceId String
+  role        String    // ADMIN, EDITOR, VIEWER
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model File {
+  id           String       @id @default(uuid())
+  originalName String
+  storedName   String       @unique
+  mimeType     String
+  size         Int
+  path         String
+  encryptionIv String       // Hex string
+  authTag      String       // Hex string (for AES-GCM)
+  scanStatus   String       @default("PENDING") // PENDING, CLEAN, INFECTED
+  createdAt    DateTime     @default(now())
+  
+  uploadedBy   String
+  uploader     User         @relation(fields: [uploadedBy], references: [id])
+  
+  workspaceId  String
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  
+  sharedLinks  SharedLink[]
+}
+
+model SharedLink {
+  id           String   @id @default(uuid())
+  fileId       String
+  token        String   @unique
+  passwordHash String?
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  file         File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String
+  targetId   String
+  targetType String
+  timestamp  DateTime @default(now())
+}
