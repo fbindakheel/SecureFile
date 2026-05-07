@@ -11,10 +11,11 @@ interface Workspace {
 }
 
 export const Dashboard = () => {
-  const { user, logout } = useAuth();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,6 +28,8 @@ export const Dashboard = () => {
       setWorkspaces(data);
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -46,13 +49,22 @@ export const Dashboard = () => {
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWorkspaceName.trim()) return;
+
+    // Optimistic Update: Add to UI immediately
+    const tempId = 'temp-' + Date.now();
+    const optimisticWs = { id: tempId, name: newWorkspaceName, role: 'ADMIN' };
+    setWorkspaces([optimisticWs, ...workspaces]);
+    setNewWorkspaceName('');
+    setIsCreating(false);
+
     try {
       await api.post('/workspaces', { name: newWorkspaceName });
-      setNewWorkspaceName('');
-      setIsCreating(false);
-      fetchWorkspaces();
+      fetchWorkspaces(); // Refresh to get real ID
     } catch (err) {
       console.error(err);
+      // Rollback on error
+      setWorkspaces(workspaces.filter(ws => ws.id !== tempId));
+      alert('Failed to create workspace');
     }
   };
 
@@ -79,9 +91,12 @@ export const Dashboard = () => {
         </div>
       </nav>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold text-slate-900">Your Workspaces</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Your Workspaces</h1>
+            <p className="text-slate-500 text-sm">Collaborate securely with your team</p>
+          </div>
           <button
             onClick={() => setIsCreating(true)}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition"
@@ -119,43 +134,59 @@ export const Dashboard = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {workspaces.map((ws) => (
-            <div
-              key={ws.id}
-              onClick={() => navigate(`/workspace/${ws.id}`)}
-              className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition cursor-pointer group"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center">
-                  <div className="bg-blue-50 text-blue-600 p-3 rounded-lg mr-4 group-hover:bg-blue-100 transition">
-                    <Folder size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-slate-800 text-lg">{ws.name}</h3>
-                    <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full mt-1 inline-block">
-                      {ws.role}
-                    </span>
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="bg-white p-6 rounded-xl border border-slate-200 animate-pulse">
+                <div className="flex items-center space-x-4">
+                  <div className="h-10 w-10 bg-slate-200 rounded-lg"></div>
+                  <div className="flex-1">
+                    <div className="h-4 bg-slate-200 rounded w-3/4 mb-2"></div>
+                    <div className="h-3 bg-slate-200 rounded w-1/4"></div>
                   </div>
                 </div>
-                {ws.role === 'ADMIN' && (
-                  <button
-                    onClick={(e) => handleDeleteWorkspace(e, ws.id)}
-                    className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
-                    title="Delete Workspace"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                )}
               </div>
-            </div>
-          ))}
-          {workspaces.length === 0 && !isCreating && (
-            <div className="col-span-full text-center py-12 text-slate-500">
-              No workspaces found. Create one to get started.
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {workspaces.map((ws) => (
+              <div
+                key={ws.id}
+                onClick={() => navigate(`/workspace/${ws.id}`)}
+                className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center text-left">
+                    <div className="bg-blue-50 text-blue-600 p-3 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition">
+                      <Folder size={24} />
+                    </div>
+                    <div className="ml-4">
+                      <h3 className="font-semibold text-slate-800 text-lg">{ws.name}</h3>
+                      <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-full mt-1 inline-block">
+                        {ws.role}
+                      </span>
+                    </div>
+                  </div>
+                  {ws.role === 'ADMIN' && (
+                    <button
+                      onClick={(e) => handleDeleteWorkspace(e, ws.id)}
+                      className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+                      title="Delete Workspace"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {workspaces.length === 0 && (
+              <div className="col-span-full py-12 text-center text-slate-500">
+                You haven't joined any workspaces yet. Create one to get started!
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );
