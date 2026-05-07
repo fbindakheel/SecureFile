@@ -63,7 +63,7 @@ export const Dashboard = () => {
           <div className="flex justify-between h-16">
             <div className="flex items-center">
               <Folder className="h-6 w-6 text-blue-600 mr-2" />
-              <span className="font-bold text-xl text-slate-800">SecureShare</span>
+              <span className="font-bold text-xl text-slate-800">SecureFile</span>
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-slate-600">Welcome, {user?.name}</span>
