@@ -131,7 +131,7 @@ export const Dashboard = () => {
                   <div className="absolute inset-0 flex flex-col justify-end p-4">
                     <p className="text-white font-medium text-sm truncate mb-2">{vid.originalName}</p>
                     <button
-                      onClick={() => setWatchingFile({ id: vid.id, name: vid.originalName, workspaceId: vid.workspaceId })}
+                      onClick={() => setWatchingFile({ id: vid.id, originalName: vid.originalName, workspaceId: vid.workspaceId })}
                       className="bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded-lg flex items-center justify-center transition scale-90 group-hover:scale-100"
                     >
                       <Play size={16} className="mr-1 fill-current" /> Watch Now
