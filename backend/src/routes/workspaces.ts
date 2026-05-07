@@ -54,8 +54,12 @@ router.delete('/:id', async (req: AuthRequest, res) => {
       where: { userId_workspaceId: { userId: req.user!.id, workspaceId } }
     });
 
-    if (!membership || membership.role !== 'ADMIN') {
-      return res.status(403).json({ error: 'Only Admins can delete workspaces' });
+    if (!membership) {
+      return res.status(403).json({ error: `You are not a member of this workspace (${workspaceId})` });
+    }
+
+    if (membership.role.trim().toUpperCase() !== 'ADMIN') {
+      return res.status(403).json({ error: `Only Admins can delete workspaces. Your current role is: ${membership.role}` });
     }
 
     // 1. Get all files in workspace to delete from Cloud
