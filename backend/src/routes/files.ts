@@ -62,19 +62,62 @@ const checkWorkspaceAccess = async (req: AuthRequest, res: any, next: any) => {
 router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: AuthRequest, res) => {
   try {
     const file = req.file;
-    const { workspaceId, originalName, keyHex, ivHex } = req.body;
+    const { workspaceId, originalName, keyHex, ivHex, fileHash } = req.body;
     const membership = (req as any).membership;
 
-    if (!file) return res.status(400).json({ error: 'No file uploaded' });
     if (membership.role === 'VIEWER') return res.status(403).json({ error: 'Viewers cannot upload files' });
+
+    // --- MAGIC STEP: DEDUPLICATION (Instant Upload) ---
+    if (fileHash) {
+      const existingFile = await prisma.file.findFirst({
+        where: { fileHash }
+      });
+
+      if (existingFile) {
+        // We found this file! Just create a new reference to it.
+        const dbFile = await prisma.file.create({
+          data: {
+            originalName: originalName || existingFile.originalName,
+            storedName: uuidv4() + '-ref.enc', // Unique ID but same cloud path
+            mimeType: existingFile.mimeType,
+            size: existingFile.size,
+            path: existingFile.path, // Use the SAME cloud storage path
+            encryptionKey: existingFile.encryptionKey,
+            encryptionIv: existingFile.encryptionIv,
+            authTag: existingFile.authTag,
+            fileHash: existingFile.fileHash,
+            scanStatus: 'CLEAN',
+            uploadedBy: req.user!.id,
+            workspaceId
+          }
+        });
+
+        // Audit log
+        await prisma.auditLog.create({
+          data: {
+            userId: req.user!.id,
+            action: 'INSTANT_UPLOAD',
+            targetId: dbFile.id,
+            targetType: 'File'
+          }
+        });
+
+        // Cleanup the temp file multer created (it was never used!)
+        if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+
+        return res.json({ ...dbFile, message: 'Instant upload successful! ⚡' });
+      }
+    }
+    // --------------------------------------------------
+
+    if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
     const storedName = uuidv4() + '.enc';
 
-    // 1. Scan the file (even if encrypted, we scan for known patterns, but ideally scan happens before encryption on client)
-    // For now, we still scan on server for basic protection
+    // 1. Scan the file
     const scanStatus = await scanFile(file.path);
 
-    // 2. Upload the already encrypted file to Cloud (Supabase)
+    // 2. Upload to Cloud
     if (scanStatus === 'CLEAN') {
       await uploadToCloud(file.path, storedName);
     }
@@ -86,7 +129,7 @@ router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: 
       return res.status(400).json({ error: 'File rejected: Malware detected.' });
     }
 
-    // 4. Save to DB (Store the keys provided by the client)
+    // 4. Save to DB
     const dbFile = await prisma.file.create({
       data: {
         originalName: originalName || file.originalname,
@@ -96,7 +139,8 @@ router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: 
         path: storedName,
         encryptionKey: keyHex,
         encryptionIv: ivHex,
-        authTag: 'client-gcm', // GCM tag is typically at the end of the blob in Web Crypto
+        authTag: 'client-gcm',
+        fileHash: fileHash || '',
         scanStatus,
         uploadedBy: req.user!.id,
         workspaceId
@@ -148,7 +192,7 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
 
     if (!membership) return res.status(403).json({ error: 'Access denied' });
 
-    const fileBuffer = await downloadFromCloud(file.storedName);
+    const fileBuffer = await downloadFromCloud(file.path); // Use file.path which is the original storage name
     fs.writeFileSync(tempEncPath, fileBuffer);
 
     await prisma.auditLog.create({
@@ -160,7 +204,6 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
       }
     });
 
-    // Decrypt using the stored client key
     const decipher = decryptFileStream(tempEncPath, file.encryptionIv, file.encryptionKey);
 
     res.setHeader('Content-Type', file.mimeType);
@@ -193,7 +236,15 @@ router.delete('/:fileId', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Permission denied. Only Admins and Editors can delete files.' });
     }
 
-    await deleteFromCloud(file.storedName);
+    // Only delete from cloud if NO other files are using this path (deduplication)
+    const otherReferences = await prisma.file.findFirst({
+      where: { path: file.path, NOT: { id: fileId } }
+    });
+
+    if (!otherReferences) {
+      await deleteFromCloud(file.path);
+    }
+
     await prisma.file.delete({ where: { id: fileId } });
 
     await prisma.auditLog.create({

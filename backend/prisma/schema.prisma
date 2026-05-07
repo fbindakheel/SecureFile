@@ -50,6 +50,7 @@ model File {
   encryptionKey String      @default("")
   encryptionIv String       // Hex string
   authTag      String       // Hex string (for AES-GCM)
+  fileHash     String       @default("")
   scanStatus   String       @default("PENDING") // PENDING, CLEAN, INFECTED
   createdAt    DateTime     @default(now())
   

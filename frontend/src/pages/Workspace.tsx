@@ -59,8 +59,10 @@ export const Workspace = () => {
     setUploadError('');
 
     try {
-      // 1. Encrypt on Client (Fast!)
-      const { encryptedBlob, keyHex, ivHex } = await encryptFileClient(file);
+      setUploadStatus('Fingerprinting...');
+      // 1. Encrypt and Hash on Client
+      const { encryptedBlob, keyHex, ivHex, hashHex } = await encryptFileClient(file);
+      
       setUploadStatus('Uploading...');
 
       const formData = new FormData();
@@ -69,6 +71,7 @@ export const Workspace = () => {
       formData.append('originalName', file.name);
       formData.append('keyHex', keyHex);
       formData.append('ivHex', ivHex);
+      formData.append('fileHash', hashHex);
 
       await api.post('/files/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
