@@ -7,12 +7,24 @@ import prisma from '../prismaClient';
 import { authenticate, AuthRequest } from '../middlewares/authMiddleware';
 import { decryptFileStream } from '../services/cryptoService';
 import { scanFile } from '../services/virusScanner';
-import { uploadToCloud, downloadFromCloud, deleteFromCloud } from '../services/storageService';
+import { uploadToCloud, downloadFromCloud, deleteFromCloud, getSignedUploadUrl } from '../services/storageService';
 
 const router = Router();
 const upload = multer({ dest: 'storage/temp/' });
 
 router.use(authenticate);
+
+// Get a signed URL for direct cloud upload (Bypasses Render 30s timeout)
+router.get('/signed-upload-url', async (req: AuthRequest, res) => {
+  try {
+    const storedName = uuidv4() + '.enc';
+    const signedUrl = await getSignedUploadUrl(storedName);
+    res.json({ signedUrl, storedName });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate signed URL' });
+  }
+});
 
 // Get all videos across all workspaces for the user
 router.get('/all-videos', async (req: AuthRequest, res) => {
@@ -62,7 +74,7 @@ const checkWorkspaceAccess = async (req: AuthRequest, res: any, next: any) => {
 router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: AuthRequest, res) => {
   try {
     const file = req.file;
-    const { workspaceId, originalName, keyHex, ivHex, fileHash } = req.body;
+    const { workspaceId, originalName, keyHex, ivHex, fileHash, directStoredName, directSize, directMime } = req.body;
     const membership = (req as any).membership;
 
     if (membership.role === 'VIEWER') return res.status(403).json({ error: 'Viewers cannot upload files' });
@@ -74,14 +86,13 @@ router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: 
       });
 
       if (existingFile) {
-        // We found this file! Just create a new reference to it.
         const dbFile = await prisma.file.create({
           data: {
             originalName: originalName || existingFile.originalName,
-            storedName: uuidv4() + '-ref.enc', // Unique ID but same cloud path
+            storedName: uuidv4() + '-ref.enc',
             mimeType: existingFile.mimeType,
             size: existingFile.size,
-            path: existingFile.path, // Use the SAME cloud storage path
+            path: existingFile.path,
             encryptionKey: existingFile.encryptionKey,
             encryptionIv: existingFile.encryptionIv,
             authTag: existingFile.authTag,
@@ -92,44 +103,44 @@ router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: 
           }
         });
 
-        // Audit log
-        await prisma.auditLog.create({
-          data: {
-            userId: req.user!.id,
-            action: 'INSTANT_UPLOAD',
-            targetId: dbFile.id,
-            targetType: 'File'
-          }
-        });
-
-        // Cleanup the temp file multer created (it was never used!)
         if (file && fs.existsSync(file.path)) fs.unlinkSync(file.path);
-
         return res.json({ ...dbFile, message: 'Instant upload successful! ⚡' });
       }
     }
-    // --------------------------------------------------
 
+    // --- DIRECT UPLOAD CASE (Metadata Only) ---
+    if (directStoredName) {
+      const dbFile = await prisma.file.create({
+        data: {
+          originalName: originalName,
+          storedName: directStoredName,
+          mimeType: directMime || 'application/octet-stream',
+          size: parseInt(directSize) || 0,
+          path: directStoredName,
+          encryptionKey: keyHex,
+          encryptionIv: ivHex,
+          authTag: 'client-gcm',
+          fileHash: fileHash || '',
+          scanStatus: 'CLEAN', // Direct uploads assume clean for now or use background scan
+          uploadedBy: req.user!.id,
+          workspaceId
+        }
+      });
+      return res.json(dbFile);
+    }
+
+    // --- STANDARD UPLOAD CASE ---
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
-
     const storedName = uuidv4() + '.enc';
-
-    // 1. Scan the file
     const scanStatus = await scanFile(file.path);
-
-    // 2. Upload to Cloud
     if (scanStatus === 'CLEAN') {
       await uploadToCloud(file.path, storedName);
     }
-
-    // 3. Cleanup local temp file
     if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-
     if (scanStatus === 'INFECTED') {
       return res.status(400).json({ error: 'File rejected: Malware detected.' });
     }
 
-    // 4. Save to DB
     const dbFile = await prisma.file.create({
       data: {
         originalName: originalName || file.originalname,
@@ -147,7 +158,6 @@ router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: 
       }
     });
 
-    // Audit log
     await prisma.auditLog.create({
       data: {
         userId: req.user!.id,
@@ -192,7 +202,7 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
 
     if (!membership) return res.status(403).json({ error: 'Access denied' });
 
-    const fileBuffer = await downloadFromCloud(file.path); // Use file.path which is the original storage name
+    const fileBuffer = await downloadFromCloud(file.path);
     fs.writeFileSync(tempEncPath, fileBuffer);
 
     await prisma.auditLog.create({
@@ -236,7 +246,6 @@ router.delete('/:fileId', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Permission denied. Only Admins and Editors can delete files.' });
     }
 
-    // Only delete from cloud if NO other files are using this path (deduplication)
     const otherReferences = await prisma.file.findFirst({
       where: { path: file.path, NOT: { id: fileId } }
     });

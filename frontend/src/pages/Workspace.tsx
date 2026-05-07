@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api/api';
+import axios from 'axios';
 import { File as FileIcon, Upload, Share2, Download, ArrowLeft, ShieldCheck, AlertTriangle, Trash2, Play } from 'lucide-react';
 import { WatchParty } from '../components/WatchParty';
 import { useAuth } from '../context/AuthContext';
@@ -63,26 +64,52 @@ export const Workspace = () => {
       // 1. Encrypt and Hash on Client
       const { encryptedBlob, keyHex, ivHex, hashHex } = await encryptFileClient(file);
       
-      setUploadStatus('Uploading...');
-
+      // 2. Check for Instant Upload (Deduplication)
+      setUploadStatus('Checking for duplicates...');
       const formData = new FormData();
-      formData.append('file', encryptedBlob, file.name);
       formData.append('workspaceId', id!);
       formData.append('originalName', file.name);
-      formData.append('keyHex', keyHex);
-      formData.append('ivHex', ivHex);
       formData.append('fileHash', hashHex);
+      
+      const instantRes = await api.post('/files/upload', formData);
+      if (instantRes.data.message?.includes('Instant')) {
+        setUploadProgress(100);
+        fetchFiles();
+        return;
+      }
 
-      await api.post('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // 3. Direct Cloud Upload (Bypasses Render 30s timeout)
+      setUploadStatus('Requesting access...');
+      const { data: { signedUrl, storedName } } = await api.get('/files/signed-upload-url');
+
+      setUploadStatus('Uploading...');
+      
+      // Upload directly to Supabase
+      await axios.put(signedUrl, encryptedBlob, {
+        headers: { 'Content-Type': 'application/octet-stream' },
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
           setUploadProgress(percentCompleted);
         }
       });
+
+      // 4. Register with backend
+      setUploadStatus('Finalizing...');
+      const finalData = new FormData();
+      finalData.append('workspaceId', id!);
+      finalData.append('originalName', file.name);
+      finalData.append('directStoredName', storedName);
+      finalData.append('directSize', encryptedBlob.size.toString());
+      finalData.append('directMime', file.type);
+      finalData.append('keyHex', keyHex);
+      finalData.append('ivHex', ivHex);
+      finalData.append('fileHash', hashHex);
+
+      await api.post('/files/upload', finalData);
       fetchFiles();
     } catch (err: any) {
-      setUploadError(err.response?.data?.error || 'Upload failed');
+      console.error(err);
+      setUploadError(err.response?.data?.error || 'Upload failed. Your internet might be unstable.');
     } finally {
       setIsUploading(false);
       setUploadStatus('');

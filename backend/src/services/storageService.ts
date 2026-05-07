@@ -37,3 +37,12 @@ export const deleteFromCloud = async (fileName: string): Promise<void> => {
 
   if (error) throw error;
 };
+
+export const getSignedUploadUrl = async (storedName: string) => {
+  const { data, error } = await supabase.storage
+    .from('files')
+    .createSignedUploadUrl(storedName);
+
+  if (error) throw error;
+  return data.signedUrl;
+};
