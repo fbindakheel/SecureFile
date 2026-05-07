@@ -47,6 +47,7 @@ model File {
   mimeType     String
   size         Int
   path         String
+  encryptionKey String      @default("")
   encryptionIv String       // Hex string
   authTag      String       // Hex string (for AES-GCM)
   scanStatus   String       @default("PENDING") // PENDING, CLEAN, INFECTED

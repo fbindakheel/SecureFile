@@ -14,11 +14,15 @@ interface FileItem {
   mimeType: string;
 }
 
+import { encryptFileClient } from '../utils/crypto';
+
 export const Workspace = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [files, setFiles] = useState<FileItem[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -49,22 +53,36 @@ export const Workspace = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('workspaceId', id!);
-
     setIsUploading(true);
+    setUploadProgress(0);
+    setUploadStatus('Encrypting...');
     setUploadError('');
 
     try {
+      // 1. Encrypt on Client (Fast!)
+      const { encryptedBlob, keyHex, ivHex } = await encryptFileClient(file);
+      setUploadStatus('Uploading...');
+
+      const formData = new FormData();
+      formData.append('file', encryptedBlob, file.name);
+      formData.append('workspaceId', id!);
+      formData.append('originalName', file.name);
+      formData.append('keyHex', keyHex);
+      formData.append('ivHex', ivHex);
+
       await api.post('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
+          setUploadProgress(percentCompleted);
+        }
       });
       fetchFiles();
     } catch (err: any) {
       setUploadError(err.response?.data?.error || 'Upload failed');
     } finally {
       setIsUploading(false);
+      setUploadStatus('');
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -143,15 +161,26 @@ export const Workspace = () => {
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition disabled:opacity-50"
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center hover:bg-blue-700 transition disabled:opacity-100 relative overflow-hidden"
               >
-                {isUploading ? (
-                  <span className="animate-pulse">Encrypting & Scanning...</span>
-                ) : (
-                  <>
-                    <Upload size={18} className="mr-2" /> Upload File
-                  </>
+                {isUploading && (
+                  <div 
+                    className="absolute inset-0 bg-blue-500/50 transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
                 )}
+                <span className="relative z-10 flex items-center">
+                  {isUploading ? (
+                    <>
+                      <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
+                      {uploadStatus} {uploadProgress}%
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={18} className="mr-2" /> Upload File
+                    </>
+                  )}
+                </span>
               </button>
             </div>
           </div>

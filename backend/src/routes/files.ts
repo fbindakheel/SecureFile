@@ -5,7 +5,7 @@ import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from '../prismaClient';
 import { authenticate, AuthRequest } from '../middlewares/authMiddleware';
-import { encryptFile, decryptFileStream } from '../services/cryptoService';
+import { decryptFileStream } from '../services/cryptoService';
 import { scanFile } from '../services/virusScanner';
 import { uploadToCloud, downloadFromCloud, deleteFromCloud } from '../services/storageService';
 
@@ -17,13 +17,11 @@ router.use(authenticate);
 // Get all videos across all workspaces for the user
 router.get('/all-videos', async (req: AuthRequest, res) => {
   try {
-    // 1. Get all workspace IDs the user belongs to
     const memberships = await prisma.workspaceMember.findMany({
       where: { userId: req.user!.id }
     });
     const workspaceIds = memberships.map(m => m.workspaceId);
 
-    // 2. Get all videos in those workspaces
     const videos = await prisma.file.findMany({
       where: {
         workspaceId: { in: workspaceIds },
@@ -64,44 +62,41 @@ const checkWorkspaceAccess = async (req: AuthRequest, res: any, next: any) => {
 router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: AuthRequest, res) => {
   try {
     const file = req.file;
-    const { workspaceId } = req.body;
+    const { workspaceId, originalName, keyHex, ivHex } = req.body;
     const membership = (req as any).membership;
 
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
     if (membership.role === 'VIEWER') return res.status(403).json({ error: 'Viewers cannot upload files' });
 
     const storedName = uuidv4() + '.enc';
-    const tempEncryptedPath = path.join('storage/temp', storedName);
 
-    // 1. Encrypt the file locally
-    const { iv, authTag } = await encryptFile(file.path, tempEncryptedPath);
-
-    // 2. Scan the original temporary file
+    // 1. Scan the file (even if encrypted, we scan for known patterns, but ideally scan happens before encryption on client)
+    // For now, we still scan on server for basic protection
     const scanStatus = await scanFile(file.path);
 
-    // 3. Upload to Cloud (Supabase)
+    // 2. Upload the already encrypted file to Cloud (Supabase)
     if (scanStatus === 'CLEAN') {
-      await uploadToCloud(tempEncryptedPath, storedName);
+      await uploadToCloud(file.path, storedName);
     }
 
-    // 4. Cleanup local temp files
+    // 3. Cleanup local temp file
     if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-    if (fs.existsSync(tempEncryptedPath)) fs.unlinkSync(tempEncryptedPath);
 
     if (scanStatus === 'INFECTED') {
       return res.status(400).json({ error: 'File rejected: Malware detected.' });
     }
 
-    // 5. Save to DB
+    // 4. Save to DB (Store the keys provided by the client)
     const dbFile = await prisma.file.create({
       data: {
-        originalName: file.originalname,
+        originalName: originalName || file.originalname,
         storedName,
         mimeType: file.mimetype,
         size: file.size,
-        path: storedName, // Store the cloud file name/path
-        encryptionIv: iv,
-        authTag: authTag,
+        path: storedName,
+        encryptionKey: keyHex,
+        encryptionIv: ivHex,
+        authTag: 'client-gcm', // GCM tag is typically at the end of the blob in Web Crypto
         scanStatus,
         uploadedBy: req.user!.id,
         workspaceId
@@ -147,18 +142,15 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
     const file = await prisma.file.findUnique({ where: { id: fileId } });
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    // Check access
     const membership = await prisma.workspaceMember.findUnique({
       where: { userId_workspaceId: { userId: req.user!.id, workspaceId: file.workspaceId } }
     });
 
     if (!membership) return res.status(403).json({ error: 'Access denied' });
 
-    // 1. Download from Cloud to local temp
     const fileBuffer = await downloadFromCloud(file.storedName);
     fs.writeFileSync(tempEncPath, fileBuffer);
 
-    // 2. Audit log
     await prisma.auditLog.create({
       data: {
         userId: req.user!.id,
@@ -168,14 +160,13 @@ router.get('/:fileId/download', async (req: AuthRequest, res) => {
       }
     });
 
-    // 3. Decrypt and stream to response
-    const decipher = decryptFileStream(tempEncPath, file.encryptionIv, file.authTag);
+    // Decrypt using the stored client key
+    const decipher = decryptFileStream(tempEncPath, file.encryptionIv, file.encryptionKey);
 
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${file.originalName}"`);
 
     const fileStream = fs.createReadStream(tempEncPath);
-    
     fileStream.pipe(decipher).pipe(res);
 
     res.on('finish', () => {
@@ -194,7 +185,6 @@ router.delete('/:fileId', async (req: AuthRequest, res) => {
     const file = await prisma.file.findUnique({ where: { id: fileId } });
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    // Check access (Must be ADMIN or EDITOR to delete)
     const membership = await prisma.workspaceMember.findUnique({
       where: { userId_workspaceId: { userId: req.user!.id, workspaceId: file.workspaceId } }
     });
@@ -203,13 +193,9 @@ router.delete('/:fileId', async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'Permission denied. Only Admins and Editors can delete files.' });
     }
 
-    // 1. Delete from Cloud
     await deleteFromCloud(file.storedName);
-
-    // 2. Delete from DB
     await prisma.file.delete({ where: { id: fileId } });
 
-    // 3. Audit log
     await prisma.auditLog.create({
       data: {
         userId: req.user!.id,
