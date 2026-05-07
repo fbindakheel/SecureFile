@@ -80,9 +80,9 @@ router.post('/upload', upload.single('file'), checkWorkspaceAccess, async (req: 
     if (membership.role === 'VIEWER') return res.status(403).json({ error: 'Viewers cannot upload files' });
 
     // --- MAGIC STEP: DEDUPLICATION (Instant Upload) ---
-    if (fileHash) {
+    if (fileHash && fileHash.trim() !== '') {
       const existingFile = await prisma.file.findFirst({
-        where: { fileHash }
+        where: { fileHash, NOT: { fileHash: '' } }
       });
 
       if (existingFile) {
